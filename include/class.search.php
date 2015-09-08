@@ -31,7 +31,7 @@ abstract class SearchBackend {
     const SORT_OLDEST = 3;
 
     abstract function update($model, $id, $content, $new=false, $attrs=array());
-    abstract function find($query, $criteria, $model=false, $sort=array());
+    abstract function find($query, $criteria=array(), $model=false, $sort=array());
 
     static function register($backend=false) {
         $backend = $backend ?: get_called_class();
@@ -61,8 +61,9 @@ class SearchInterface {
         $this->bootstrap();
     }
 
-    function find($query, $criteria, $model=false, $sort=array()) {
+    function find($query, $criteria=array(), $model=false, $sort=array()) {
         $query = Format::searchable($query);
+
         return $this->backend->find($query, $criteria, $model, $sort);
     }
 
@@ -202,37 +203,19 @@ class SearchInterface {
     }
 }
 
-require_once(INCLUDE_DIR.'class.config.php');
-class MySqlSearchConfig extends Config {
-    var $table = CONFIG_TABLE;
-
-    function __construct() {
-        parent::Config("mysqlsearch");
-    }
-}
-
 class MysqlSearchBackend extends SearchBackend {
     static $id = 'mysql';
     static $BATCH_SIZE = 30;
 
     // Only index 20 batches per cron run
     var $max_batches = 60;
-    var $_reindexed = 0;
 
     function __construct() {
         $this->SEARCH_TABLE = TABLE_PREFIX . '_search';
     }
 
-    function getConfig() {
-        if (!isset($this->config))
-            $this->config = new MySqlSearchConfig();
-        return $this->config;
-    }
-
-
     function bootstrap() {
-        if ($this->getConfig()->get('reindex', true))
-            Signal::connect('cron', array($this, 'IndexOldStuff'));
+        Signal::connect('cron', array($this, 'IndexOldStuff'));
     }
 
     function update($model, $id, $content, $new=false, $attrs=array()) {
@@ -454,7 +437,7 @@ class MysqlSearchBackend extends SearchBackend {
         $galera = db_result(db_query($sql));
 
         if ($galera && !$mysql56)
-            throw new Exception('Galera cannot be used with MyISAM tables. Upgrade to MariaDB 10 / MySQL 5.6 is required');
+            throw new Exception('Galera cannot be used with MyISAM tables');
         $engine = $galera ? 'InnodB' : ($mysql56 ? '' : 'MyISAM');
         if ($engine)
             $engine = 'ENGINE='.$engine;
@@ -467,18 +450,12 @@ class MysqlSearchBackend extends SearchBackend {
             primary key `object` (`object_type`, `object_id`),
             fulltext key `search` (`title`, `content`)
         ) $engine CHARSET=utf8";
-        if (!db_query($sql))
-            return false;
-
-        // Start rebuilding the index
-        $config = new MySqlSearchConfig();
-        $config->set('reindex', 1);
-        return true;
+        return db_query($sql);
     }
 
     /**
      * Cooperates with the cron system to automatically find content that is
-     * not indexed in the _search table and add it to the index.
+     * not index in the _search table and add it to the index.
      */
     function IndexOldStuff() {
         $class = get_class();
@@ -613,11 +590,6 @@ class MysqlSearchBackend extends SearchBackend {
 
         // Flush non-full batch of records
         $this->__index(null, true);
-
-        if (!$this->_reindexed) {
-            // Stop rebuilding the index
-            $this->getConfig()->set('reindex', 0);
-        }
     }
 
     function __index($record, $force_flush=false) {
@@ -637,10 +609,9 @@ class MysqlSearchBackend extends SearchBackend {
 
         $sql = 'INSERT INTO `'.TABLE_PREFIX.'_search` (`object_type`, `object_id`, `title`, `content`)
             VALUES '.implode(',', $queue);
-        if (!db_query($sql, false) || count($queue) != db_affected_rows())
+        if (!db_query($sql) || count($queue) != db_affected_rows())
             throw new Exception('Unable to index content');
 
-        $this->_reindexed += count($queue);
         $queue = array();
 
         if (!--$this->max_batches)

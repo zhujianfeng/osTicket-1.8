@@ -39,28 +39,17 @@ ob_start(); //Keep the image output clean. Hide our dirt.
 $sec=time()-$_SESSION['lastcroncall'];
 $caller = $thisstaff->getUserName();
 
-// Agent can call cron once every 3 minutes.
-if ($sec < 180 || !$ost || $ost->isUpgradePending())
-    ob_end_clean();
-
+if($sec>180 && $ost && !$ost->isUpgradePending()): //user can call cron once every 3 minutes.
 require_once(INCLUDE_DIR.'class.cron.php');
 
-// Clear staff obj to avoid false credit internal notes & auto-assignment
-$thisstaff = null;
+$thisstaff = null; //Clear staff obj to avoid false credit internal notes & auto-assignment
+Cron::TicketMonitor(); //Age tickets: We're going to age tickets regardless of cron settings.
 
-// Release the session to prevent locking a future request while this is
-// running
-$_SESSION['lastcroncall'] = time();
-session_write_close();
-
-// Age tickets: We're going to age tickets regardless of cron settings.
-Cron::TicketMonitor();
-
-// Run file purging about every 20 cron runs (1h40 on a five minute cron)
-if (mt_rand(1, 20) == 4)
+// Run file purging about every 30 minutes
+if (mt_rand(1, 9) == 4)
     Cron::CleanOrphanedFiles();
 
-if($cfg && $cfg->isAutoCronEnabled()) { //ONLY fetch tickets if autocron is enabled!
+if($cfg && $cfg->isAutoCronEnabled() && !DEV) { //ONLY fetch tickets if autocron is enabled!
     Cron::MailFetcher();  //Fetch mail.
     $ost->logDebug(_S('Auto Cron'), sprintf(_S('Mail fetcher cron call [%s]'), $caller));
 }
@@ -68,5 +57,7 @@ if($cfg && $cfg->isAutoCronEnabled()) { //ONLY fetch tickets if autocron is enab
 $data = array('autocron'=>true);
 Signal::send('cron', $data);
 
+$_SESSION['lastcroncall']=time();
+endif;
 ob_end_clean();
 ?>
