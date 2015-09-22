@@ -2,6 +2,7 @@
 
 include_once INCLUDE_DIR.'class.api.php';
 include_once INCLUDE_DIR.'class.ticket.php';
+include_once INCLUDE_DIR.'class.user.php';
 
 class TicketApiController extends ApiController {
 
@@ -92,8 +93,11 @@ class TicketApiController extends ApiController {
         return true;
     }
 
-
+    /**
+    * Create the ticket.
+    */
     function create($format) {
+        $this->_format = $format;
 
         if(!($key=$this->requireApiKey()) || !$key->canCreateTickets())
             return $this->exerr(401, __('API key not authorized'));
@@ -110,7 +114,17 @@ class TicketApiController extends ApiController {
         if(!$ticket)
             return $this->exerr(500, __("Unable to create new ticket: unknown error"));
 
-        $this->response(201, $ticket->getNumber());
+
+        if (!strcasecmp($format, 'json')) {
+            $result = array(
+                'user' => $ticket->getUserId(),
+                'number' => $ticket->getNumber(),
+                );
+            $this->response(201, json_encode($result));
+        } else {
+            // TODO change the ouput for email and xml
+            $this->response(201, $ticket->getNumber());
+        }
     }
 
     /* private helper functions */
@@ -227,6 +241,133 @@ class TicketApiController extends ApiController {
         $this->response(201, json_encode(array('id' => $params['id'], 'error' => 'TicketNotFound')));
     }
 
+    /**
+    * Get client thread for a given ticket number
+    */
+    function getClientThread($format) {
+        $this->initalizeUser($format);
+        $params = $this->getRequest($format);
+
+        $ticket_model = Ticket::lookupByNumber($params['number']);
+        if (empty($ticket_model) || $ticket_model->number != $params['number']) {
+            return $this->exerr(404, __("Unable to find the ticket"));
+        }
+        $client_thread_entries = $ticket_model->getClientThread();
+
+        // add attachments
+        foreach ($client_thread_entries as &$entry) {
+            $entry_model = $ticket_model->getThreadEntry($entry['id']);
+            $entry['attachments'] = $entry_model->getAttachmentUrls();
+        }
+        $this->response(201, json_encode($client_thread_entries));
+    }
+
+    /**
+    * Get all tickets under the given user email
+    */
+    function getTickets($format) {
+        $this->initalizeUser($format);
+        $params = $this->getRequest($format);
+
+        $user_model = User::lookupByEmail($params['email']);
+        if (empty($user_model)) {
+            return $this->exerr(404, __("Unable to find the user"));
+        }
+        // reference class.search.php:SearchInterface::find
+        // $search = new SearchInterface();
+        // $results = $search->find('', $criteria);
+        // $this->response(
+        //     201,
+        //     json_encode(
+        //       array(
+        //         'data' => $results,
+        //         'count' => count($results)
+        //       )
+        //     )
+        // );
+        // refrence class.orm.php:InstrumentedList
+        // $user_model->tickets
+        $ticket_models = $user_model->tickets->objects()->all();
+        $tickets = array();
+        foreach ($ticket_models as $ticket_model) {
+            $ticket = $ticket_model->ht;
+            $tickets[] = $ticket;
+        }
+        $this->response(
+            201,
+            json_encode($tickets)
+        );
+    }
+
+    /**
+    * add message form a client on ticket of given number
+    */
+    function postMessage($format) {
+        $this->initalizeUser($format);
+        $params = $this->getRequest($format);
+
+        if (!isset($params['email']) ||
+            !isset($params['number']) ||
+            !isset($params['message'])) {
+            return $this->exerr(400, __("Parameter invalid"));
+        }
+
+        // $params['email']
+        // $params['number']
+        // $params['message'], this was parsed to HtmlThreadBody
+        // $params['attachments']
+        $ticket_model = Ticket::lookupByNumber($params['number']);
+        if (empty($ticket_model) || $ticket_model->number != $params['number'] || $ticket_model->getEmail() != $params['email']) {
+            return $this->exerr(404, __("Unable to find the ticket"));
+        }
+        // reference class.thread.php:ThreadEntry::create
+        // vars['ip']
+        // vars['poster'] or $vars['userId']
+        // $vars['message']
+        // $vars['attachments']
+        $vars = array(
+            'ip' => $params['ip'],
+            'poster' => $params['email'],
+            'message' => $params['message'],
+            );
+        if (isset($params['attachments'])) {
+            $vars['attachments'] = $params['attachments'];
+        }
+        
+        $message_model = $ticket_model->postMessage($vars);
+        if (empty($message_model)) {
+            return $this->exerr(500, __("Failed to add the message"));
+        }
+        $this->response(
+            201,
+            json_encode($message_model->id)
+        );
+    }
+
+    /**
+    * To response with correct ContentType
+    */
+    private $_format = 'json';
+    function response($code, $resp) {
+        $format_to_type = array(
+            'email' => 'text/html',
+            'json' => 'text/json',
+            'xml' => 'text/xml',
+            );
+        $content_type = $format_to_type[$this->_format];
+        // wrap the exerr input
+        if ($code >= 400) {
+            if (!strcasecmp($this->_format, 'json')) {
+                $wrap = array(
+                    'error' => $resp,
+                    );
+                $resp = json_encode($wrap);
+            }
+            // TODO xml
+        }
+        Http::response($code, $resp, $content_type);
+        exit();
+    }
 
     private function initalizeUser($format) {
       if(!($key=$this->requireApiKey()) || !$key->canGetTicketData())
