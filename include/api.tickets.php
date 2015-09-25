@@ -193,15 +193,31 @@ class TicketApiController extends ApiController {
       );
     }
 
+    /**
+    * Get ticket by number, not id
+    */
     function getTicket($format) {
-      $this->initalizeUser($format);
-      $params = $this->getRequest($format);
+        $this->initalizeUser($format);
+        $params = $this->getRequest($format);
 
-      $ticket = new Ticket($params['id']);
-      if($ticket->id==$params['id'])
-        $this->response(201, json_encode($ticket->getApiData()));
-      else
-        $this->response(201, json_encode(array('id' => $params['id'], 'error' => 'TicketNotFound')));
+        $ticket = Ticket::lookupByNumber($params['number']);
+        if (empty($ticket) || $ticket->number != $params['number'] || $ticket->getEmail() != $params['email']) {
+            return $this->exerr(404, __("Unable to find the ticket"));
+        } else {
+            $ticket_data = $ticket->ht;
+            // display more fields
+            $ticket_data['subject'] = $ticket->getSubject();
+            $ticket_data['dept_name'] = $ticket->getDeptName();
+            if($team = $ticket->getTeam()) {
+                $team_name = $team->getName();
+            } else {
+                $team_name = '';
+            }
+            $ticket_data['team_name'] = $team_name;
+            // TODO get close note and status
+
+            $this->response(201, json_encode($ticket_data));
+        }
     }
 
     function getThreadEntry($format) {
@@ -219,26 +235,33 @@ class TicketApiController extends ApiController {
 
     }
 
+    /**
+    * change ticket statues by number, email, status_id, and comments.
+    */
     function changeTicketStatus($format) {
-      $this->initalizeUser($format);
-      $params = $this->getRequest($format);
+        $this->initalizeUser($format);
+        $params = $this->getRequest($format);
 
-      $ticket = new Ticket($params['id']);
-
-      if(empty($params['comments']))
-        return $this->exerr(500, __("Unable to change ticket status: comments missing"));
-
-      if($ticket->id==$params['id']) {
-        if($ticket->setStatus($params['status'], $params['comments'])) {
-          $this->response(201, json_encode(array(
-            'ticket_id' => $ticket->id,
-            'status' => $ticket->getStatusId()
-          )));
-        } else {
-          $this->response(201, json_encode(array('id' => $params['id'], 'status' => $ticket->getStatusId(), 'error' => 'TicketStatusNotChanged')));
+        $ticket = Ticket::lookupByNumber($params['number']);
+        if (empty($ticket) || $ticket->number != $params['number'] || $ticket->getEmail() != $params['email']) {
+            return $this->exerr(404, __("Unable to find the ticket"));
         }
-      } else
-        $this->response(201, json_encode(array('id' => $params['id'], 'error' => 'TicketNotFound')));
+
+        if(empty($params['comments']))
+            return $this->exerr(500, __("Unable to change ticket status: comments missing"));
+
+        // id is from ost_ticket_status table, should add an api to list them
+        if($ticket->setStatus($params['status_id'], $params['comments'])) {
+            $this->response(
+                201, 
+                json_encode(array(
+                    'ticket_id' => $ticket->id,
+                    'status_id' => $ticket->getStatusId()
+                ))
+            );
+        } else {
+            $this->response(500, __("Failed to change ticket status"));
+        }
     }
 
     /**
@@ -248,15 +271,15 @@ class TicketApiController extends ApiController {
         $this->initalizeUser($format);
         $params = $this->getRequest($format);
 
-        $ticket_model = Ticket::lookupByNumber($params['number']);
-        if (empty($ticket_model) || $ticket_model->number != $params['number']) {
+        $ticket = Ticket::lookupByNumber($params['number']);
+        if (empty($ticket) || $ticket->number != $params['number'] || $ticket->getEmail() != $params['email']) {
             return $this->exerr(404, __("Unable to find the ticket"));
         }
-        $client_thread_entries = $ticket_model->getClientThread();
+        $client_thread_entries = $ticket->getClientThread();
 
         // add attachments
         foreach ($client_thread_entries as &$entry) {
-            $entry_model = $ticket_model->getThreadEntry($entry['id']);
+            $entry_model = $ticket->getThreadEntry($entry['id']);
             $entry['attachments'] = $entry_model->getAttachmentUrls();
         }
         $this->response(201, json_encode($client_thread_entries));
@@ -286,11 +309,21 @@ class TicketApiController extends ApiController {
         //     )
         // );
         // refrence class.orm.php:InstrumentedList
-        // $user_model->tickets
-        $ticket_models = $user_model->tickets->objects()->all();
+        // $user_model->tickets, get class.user.php:TicketModel
+        $ticket_models = $user_model->tickets->asArray();
         $tickets = array();
         foreach ($ticket_models as $ticket_model) {
             $ticket = $ticket_model->ht;
+            // display more fields
+            $real_ticket = Ticket::lookup($ticket_model->getId());
+            $ticket['subject'] = $real_ticket->getSubject();
+            $ticket['dept_name'] = $real_ticket->getDeptName();
+            if($team=$real_ticket->getTeam()) {
+                $team_name = $team->getName();
+            } else {
+                $team_name = '';
+            }
+            $ticket['team_name'] = $team_name;
             $tickets[] = $ticket;
         }
         $this->response(
@@ -316,8 +349,9 @@ class TicketApiController extends ApiController {
         // $params['number']
         // $params['message'], this was parsed to HtmlThreadBody
         // $params['attachments']
-        $ticket_model = Ticket::lookupByNumber($params['number']);
-        if (empty($ticket_model) || $ticket_model->number != $params['number'] || $ticket_model->getEmail() != $params['email']) {
+        // $params['close'] 'true' to set ticket as resolved
+        $ticket = Ticket::lookupByNumber($params['number']);
+        if (empty($ticket) || $ticket->number != $params['number'] || $ticket->getEmail() != $params['email']) {
             return $this->exerr(404, __("Unable to find the ticket"));
         }
         // reference class.thread.php:ThreadEntry::create
@@ -334,13 +368,19 @@ class TicketApiController extends ApiController {
             $vars['attachments'] = $params['attachments'];
         }
         
-        $message_model = $ticket_model->postMessage($vars);
-        if (empty($message_model)) {
+        $message = $ticket->postMessage($vars);
+        if (empty($message)) {
             return $this->exerr(500, __("Failed to add the message"));
         }
+
+        if ($params['close'] === 'true') {
+            $ticket->setStatus(2, 'by postMessage', FALSE);
+            $ticket->setAnsweredState(1);
+        }
+
         $this->response(
             201,
-            json_encode($message_model->id)
+            json_encode($message->id)
         );
     }
 

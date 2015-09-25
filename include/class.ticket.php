@@ -955,6 +955,7 @@ class Ticket {
 
         switch(strtolower($state)) {
             case 'open':
+                // TODO I dont think this works using name than numeric id
                 return $this->setStatus('open');
                 break;
             case 'closed':
