@@ -16,7 +16,7 @@ class TicketApiController extends ApiController {
                 array("name", "type", "data", "encoding", "size")
             ),
             "message", "ip", "priorityId",
-            "passwd", "user", "close"
+            "passwd", "user", "close", "number", "status_id"
         );
         # Fetch dynamic form field names for the given help topic and add
         # the names to the supported request structure
@@ -209,12 +209,21 @@ class TicketApiController extends ApiController {
             // display more fields
             $ticket_data['subject'] = $ticket->getSubject();
             $ticket_data['dept_name'] = $ticket->getDeptName();
-            if($team = $ticket->getTeam()) {
-                $team_name = $team->getName();
+            // if($team = $ticket->getTeam()) {
+            //     $team_name = $team->getName();
+            // } else {
+            //     $team_name = '';
+            // }
+            // $ticket_data['team_name'] = $team_name;
+            if ($staff = $ticket->getStaff()) {
+                $group = $staff->getGroup();
+                $ticket['group_id'] = $group->getId();
+                $ticket['group_name'] = $group->getName();
             } else {
-                $team_name = '';
+                $ticket['group_id'] = '0';
+                $ticket['group_name'] = '';
             }
-            $ticket_data['team_name'] = $team_name;
+            
             // TODO get close note and status
 
             $this->response(201, json_encode($ticket_data));
@@ -319,12 +328,21 @@ class TicketApiController extends ApiController {
             $real_ticket = Ticket::lookup($ticket_model->getId());
             $ticket['subject'] = $real_ticket->getSubject();
             $ticket['dept_name'] = $real_ticket->getDeptName();
-            if($team=$real_ticket->getTeam()) {
-                $team_name = $team->getName();
+            // if($team=$real_ticket->getTeam()) {
+            //     $team_name = $team->getName();
+            // } else {
+            //     $team_name = '';
+            // }
+            // $ticket['team_name'] = $team_name;
+            if ($staff = $real_ticket->getStaff()) {
+                $group = $staff->getGroup();
+                $ticket['group_id'] = $group->getId();
+                $ticket['group_name'] = $group->getName();
             } else {
-                $team_name = '';
+                $ticket['group_id'] = '0';
+                $ticket['group_name'] = '';
             }
-            $ticket['team_name'] = $team_name;
+
             $tickets[] = $ticket;
         }
         $this->response(
