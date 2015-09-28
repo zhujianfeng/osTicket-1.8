@@ -217,11 +217,11 @@ class TicketApiController extends ApiController {
             // $ticket_data['team_name'] = $team_name;
             if ($staff = $ticket->getStaff()) {
                 $group = $staff->getGroup();
-                $ticket['group_id'] = $group->getId();
-                $ticket['group_name'] = $group->getName();
+                $ticket_data['group_id'] = $group->getId();
+                $ticket_data['group_name'] = $group->getName();
             } else {
-                $ticket['group_id'] = '0';
-                $ticket['group_name'] = '';
+                $ticket_data['group_id'] = '0';
+                $ticket_data['group_name'] = '';
             }
             
             // TODO get close note and status
@@ -392,9 +392,11 @@ class TicketApiController extends ApiController {
             return $this->exerr(500, __("Failed to add the message"));
         }
 
-        if ($params['close'] === 'true') {
-            $ticket->setStatus(2, 'by postMessage', FALSE);
-            $ticket->setAnsweredState(1);
+        if (isset($params['close']) && $params['close'] == 'true') {
+            // TODO why not resolved or closed
+            $ticket->setStatus(3, 'by postMessage', FALSE);
+            $ticket->markAnswered();
+        } else {
         }
 
         $this->response(

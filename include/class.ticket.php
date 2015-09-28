@@ -2014,7 +2014,9 @@ class Ticket {
         }
 
         // If alerts are not enabled then return a success.
-        if(!$alert || !$cfg->alertONNewNote() || !($dept=$this->getDept()))
+        // TODO bug, fatal error
+        // if(!$alert || !$cfg->alertONNewNote() || !($dept=$this->getDept()))
+        if(!$alert || TRUE || !($dept=$this->getDept()))
             return $note;
 
         if (($email = $dept->getAlertEmail())
